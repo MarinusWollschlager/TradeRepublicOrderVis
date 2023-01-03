@@ -1,10 +1,9 @@
 import dataclasses
 from dataclasses import dataclass, field
-from PyPDF2 import PdfFileReader
+from PyPDF2 import PdfReader
 import os
 from datetime import datetime
 from typing import Optional
-#import investpy
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -91,8 +90,8 @@ class PdfParser():
             """parse text elements from .pdf file into a list"""
 
             with open(self._PATH_TO_PDF.joinpath(pdf_file_name), "rb") as pdf_file:
-                pdf_reader = PdfFileReader(pdf_file)
-                page_obj = pdf_reader.getPage(page)
+                pdf_reader = PdfReader(pdf_file)
+                page_obj = pdf_reader.pages[page]
                 pdf_text_elements = page_obj.extract_text().split("\n")
 
             return pdf_text_elements
@@ -218,19 +217,21 @@ class PdfParser():
 
             df.set_index(["date"], inplace=True)
 
-            for isin in df["isin"].unique():
-                df[f"{isin}_count"] = np.nan
-                df[f"{isin}_buy_in"] = np.nan
-
-                df.loc[df["isin"] == isin, [f"{isin}_count"]] = df.loc[df["isin"] == isin]["share_quantity"].cumsum()
-
-                df_etf = df.loc[df["isin"] == isin]
-
-                df.loc[df["isin"] == isin, [f"{isin}_buy_in"]] = df_etf["order_total"].cumsum() / df_etf[f"{isin}_count"]
-
-            df.fillna(method="ffill", inplace=True)
-
             return df
+
+    def get_invest_history_isin(self, isin: str) -> pd.DataFrame:
+        """filters parsed orders on isin and returns df with invest history on daily granularity (explorated)"""
+
+        df = pd.DataFrame(index=pd.date_range(start=self.date_oldest_order, end=self.date_recent_order))
+        order_sorted_df_isin = self.order_sorted_df.loc[self.order_sorted_df["isin"]==isin].copy()
+
+        order_sorted_df_isin["acc_shares"] = order_sorted_df_isin["share_quantity"].cumsum()
+
+        order_sorted_df_isin["buy_in"] = order_sorted_df_isin["order_total"].cumsum() / order_sorted_df_isin["acc_shares"]
+
+        df_joined = df.join(other=order_sorted_df_isin).fillna(method="ffill")
+
+        return df_joined.loc[:, ["acc_shares", "buy_in"]]
 
     def _validate_path_to_pdfs(self, path_to_pdf: str):
         """valdiates if path_to_pdf exists"""

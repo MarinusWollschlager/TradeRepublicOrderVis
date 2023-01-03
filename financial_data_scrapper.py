@@ -12,7 +12,6 @@ import dataclasses
 class HistoricalDataPoint():
 	isin: str
 	date: datetime.date
-	open_rate: float
 	close_rate: float
 
 class FinanceDataScraper():
@@ -67,28 +66,6 @@ class FinanceDataScraper():
 
 	    return data
 
-	def _request_return_2_df(self, request_return: list) -> pd.DataFrame:
-		"""converts dict"""
-
-		isin = request_return["isin"]
-		self._historical_data_point_list = []
-		for data_point in request_return["data"]:
-			date = datetime.strptime(data_point["date"], "%Y-%m-%d")
-			open_rate = data_point["open"]
-			close_rate = data_point["close"]
-
-			self._historical_data_point_list.append(HistoricalDataPoint(isin,
-				date,
-				open_rate,
-				close_rate))
-
-		df = pd.DataFrame([dataclasses.asdict(data_point) for data_point in self._historical_data_point_list])
-
-		df.set_index(["date"], inplace=True)
-		df.sort_index(inplace=True)
-
-		return df
-
 	def fetch_historical_data_points(self, isin: str, from_date: datetime.date, to_date: datetime.date, exchange: str = "XETR"):
 		"""request historical Xetra data via scraping"""
 
@@ -102,10 +79,34 @@ class FinanceDataScraper():
 			"limit": date_delta.days
 		}
 
-		data = self._data_request("price_history", params=(params_request | self._REQUEST_CLEAN_PARAMS))
+		request_return_dict = self._data_request("price_history", params=(params_request | self._REQUEST_CLEAN_PARAMS))
 
-		return self._request_return_2_df(data)
+		historical_data_point_list = []
+		for data_point in request_return_dict["data"]:
+			date = datetime.strptime(data_point["date"], "%Y-%m-%d")
+			close_rate = data_point["close"]
+
+			historical_data_point_list.append(HistoricalDataPoint(isin,
+				date,
+				close_rate))
+
+		df = pd.DataFrame([dataclasses.asdict(data_point) for data_point in historical_data_point_list])
+
+		df.set_index(["date"], inplace=True)
+		df.sort_index(inplace=True)
+
+		df_left = pd.DataFrame(index=pd.date_range(start=from_date, end=to_date))
+
+		df_joined = df_left.join(other=df).fillna(method="ffill")
+
+		return df_joined["close_rate"]
 
 
+	def fetch_isin_name(self, isin: str):
+		"""request information about isin"""
 
+		params_request = {"isin": isin}
 
+		request_return_dict = self._data_request("instrument_information", params=params_request)
+
+		return request_return_dict["instrumentName"]["originalValue"]

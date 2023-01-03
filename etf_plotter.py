@@ -1,98 +1,107 @@
 import matplotlib.pyplot as plt
 from pathlib import Path
 import pandas as pd
-from dataclasses import dataclass, field
+from typing import List
+import matplotlib.dates as mdates
+from matplotlib.ticker import FormatStrFormatter, MultipleLocator
 
+class SubPlotObjectSingle:
+    def __init__(self, subplot_config: dict):
+        self.title = subplot_config["SubplotTitle"]
+        self._invest_history = subplot_config["invest_history"]
+        self._hist_data = subplot_config["hist_data"]
 
-class SubPlotObject():
-    def __init__(self, isin: str, isin_name: str, historical_data_df: pd.DataFrame, orders_df: pd.DataFrame):
-        self._isin = isin
-        self.isin_name = isin_name
-        self._historical_data = historical_data_df
-        self._orders_df = orders_df
-        self._orders_isin = self._orders_df.loc[self._orders_df["isin"] == self._isin, [f"{self._isin}_buy_in", f"{self._isin}_count"]]
-        self._merged_df_isin = self._historical_data.merge(self._orders_isin, how="left", left_index=True, right_index=True)
-        self._merged_df_isin.fillna(method="ffill", inplace=True)
+    def get_y(self):
+        return list(self._invest_history.index)
 
-        self.isin_value_per_day = self._calculate_isin_value_per_day()
-        self.isin_buy_in_per_day = self._calculate_isin_buy_in()
+    def get_buy_in(self):
+        return self._invest_history["acc_shares"] * self._invest_history["buy_in"]
 
-        self.loss_profit_per_day = self._get_loss_profit_per_day()
+    def get_eod_values(self):
+        return self._invest_history["acc_shares"] * self._hist_data
 
-    def _calculate_isin_value_per_day(self) -> pd.Series:
-        """calculate the value of the currently owned shares"""
+class SubPlotObjectMultiple:
+    def __init__(self, subplot_config_list: list):
+        self._subplot_config_list = subplot_config_list
+        self._buy_in_list = [_SubPlotObjectSingle.get_buy_in() for _SubPlotObjectSingle in self._subplot_config_list]
+        self._eod_values = [_SubPlotObjectSingle.get_eod_values() for _SubPlotObjectSingle in self._subplot_config_list]
 
-        return self._merged_df_isin[f"{self._isin}_count"] * self._merged_df_isin["close_rate"]
+    def get_buy_in(self):
+        return pd.concat(self._buy_in_list, axis=1).sum(axis=1)
 
-    def _calculate_isin_buy_in(self) -> pd.Series:
-        """calculate the buy in * count per day"""
-    
-        return self._merged_df_isin[f"{self._isin}_count"] * self._merged_df_isin[f"{self._isin}_buy_in"]
-
-    def _get_loss_profit_per_day(self) -> pd.Series:
-        """calculate the current loss or profit per day"""
-
-        return self.isin_value_per_day - self.isin_buy_in_per_day
-
+    def get_eod_values(self):
+        return pd.concat(self._eod_values, axis=1).sum(axis=1)
 
 class EtfPlotter():
-    def __init__(self, path_to_safe: Path, file_name: str, parsed_orders: pd.DataFrame, plot_time_range: tuple):
+    def __init__(self, path_to_safe: Path, file_name: str, plot_time_range: tuple):
         self._PATH_TO_SAFE = path_to_safe
         self._FILE_NAME = file_name
-        self._parsed_orders = parsed_orders
         self._plot_time_range = plot_time_range
 
         self._subplot_object_list = []
 
-    def add_subplot(self, isin: str, isin_name: str, historical_data: pd.DataFrame) -> None:
+    def add_subplot(self, subplot_config: dict) -> None:
         """creates subplot object and appends it to the list to plot"""
 
-        self._subplot_object_list.append(SubPlotObject(isin, isin_name, historical_data, self._parsed_orders))
+        self._subplot_object_list.append(SubPlotObjectSingle(subplot_config))
 
-    def format_plot(self, list_of_axes: []) -> None:
-        """
-        formats the whole block:
-        - shared x
-        - quarterly tick labels
-        - legend in each subplot
-        - title in each block
-        """
+    def _format_ax(self, ax: plt.axis) -> None:
+        """formats an axis"""
 
-        for ax in list_of_axes:
-            ax.legend(loc="upper left", frameon=False)
-            ax.set_title()
+        # set x mayor & minor ticks and labels
+        ax.xaxis.set_major_locator(mdates.YearLocator())
+        ax.xaxis.set_minor_locator(mdates.MonthLocator(bymonth=(4, 7, 10)))
 
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+        ax.xaxis.set_minor_formatter(mdates.DateFormatter('%b'))
 
+        for label in ax.get_xticklabels(which='major'):
+            label.set(rotation=90, horizontalalignment='center')
+
+        # set y ticks
+        ax.yaxis.set_major_locator(MultipleLocator(base=1000))
+        ax.yaxis.set_minor_locator(MultipleLocator(base=200))
+        ax.yaxis.set_major_formatter(FormatStrFormatter("%d €"))
+
+        # add v lines to major ticks
+        for label in ax.get_yticklabels(which="major")[1:]:
+            ax.axhline(label.get_position()[1], color="dimgrey", alpha=.3, zorder=1, linewidth=.8)
+
+        for label in ax.get_yticklabels(which="minor")[1:]:
+            ax.axhline(label.get_position()[1], color="silver", alpha=.3, zorder=1, linewidth=.3)
+        
+        # align axis to origin
+        ax.set_xlim(left=self._plot_time_range[0], right=self._plot_time_range[1])
+        ax.set_ylim(bottom=0)
+
+        # disable spines
+        ax.spines.right.set_visible(False)
+        ax.spines.top.set_visible(False)
 
     def create_plot(self, add_summarize_block=True):
         """creates a plot out of SubPlotObjects and saves the plot as pdf"""
 
-        fig, ax = plt.subplots(len(self._subplot_object_list) + 1, figsize=(8.2, 11.6))
+        if not add_summarize_block:
+            fig, ax = plt.subplots(len(self._subplot_object_list), figsize=(8.2, 11.6), sharex=True)
+        else:
+            fig, ax = plt.subplots(len(self._subplot_object_list) + 1, figsize=(8.2, 11.6), sharex=True)
 
-        list_isin_value_per_day = []
-        list_isin_buy_in_per_day = []
         for idx, sub_plot_object in enumerate(self._subplot_object_list):
-            ax[idx].plot(sub_plot_object.isin_value_per_day, c="k", label="Value")
-            ax[idx].plot(sub_plot_object.isin_buy_in_per_day, c="g", label="Buy in")
-            ax[idx].set_xlim(left=self._plot_time_range[0], right=self._plot_time_range[1])
+            ax[idx].plot(sub_plot_object.get_eod_values(), c="g", linewidth=1, label="EoD value", zorder=2)
+            ax[idx].plot(sub_plot_object.get_buy_in(), c="k", linewidth=1, label="Buy in", zorder=2)
+            ax[idx].set_title(sub_plot_object.title, loc="left", fontsize=8)
+            ax[idx].legend(loc="upper left", fontsize=8)
 
-            # self._ax[idx].legend(loc="upper left")
-            ax[idx].set_title(sub_plot_object.isin_name)
+        if add_summarize_block:
+            ob = SubPlotObjectMultiple(self._subplot_object_list)
+            ax[-1].plot(ob.get_eod_values(), c="g", linewidth=1, label="EoD value", zorder=2)
+            ax[-1].plot(ob.get_buy_in(), c="k", linewidth=1, label="Buy in", zorder=2)
+            ax[-1].set_title("Overview", loc="left", fontsize=8)
+            ax[-1].legend(loc="upper left", fontsize=8)
 
 
-        self.format_plot(ax)
-
-            # if add_summarize_block:
-            #     list_isin_value_per_day.append(sub_plot_object.isin_value_per_day)
-            #     list_isin_buy_in_per_day.append(sub_plot_object.isin_buy_in_per_day)
-
-        # if add_summarize_block:
-        #     self._ax[-1].plot(pd.concat(list_isin_value_per_day, axis=1).sum(axis=1), c="k")
-        #     self._ax[-1].plot(pd.concat(list_isin_buy_in_per_day, axis=1).sum(axis=1), c="k")
-            
-        #     self._ax[-1].plot(pd.DataFrame({idx: pd_series for idx, pd_series in enumerate(list_isin_value_per_day)}).sum(axis=1), c="k")
-        #     self._ax[-1].plot(pd.DataFrame({idx: pd_series for idx, pd_series in enumerate(list_isin_buy_in_per_day)}).sum(axis=1), c="g")
-
+        for axis in ax:
+            self._format_ax(axis)
 
         fig.tight_layout()
         plt.savefig(f"{self._FILE_NAME}.pdf", bbox_inches="tight")
