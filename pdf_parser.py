@@ -13,8 +13,6 @@ import re
 
 
 class EtfOrder():
-    #__slots__ = "is_single_order", "date", "isin", "share_quantity", "order_total", "price_per_share"
-
     def __init__(self, 
                     is_single_order: bool,
                     date: datetime.date,
@@ -36,40 +34,6 @@ class EtfOrder():
 
     def __hash__(self):
         return int(self.date.strftime("%Y%m%d") + str(ord(self.isin[5])) + str(ord(self.isin[7])) + str(ord(self.isin[9])))
-
-
-@dataclass(frozen=True)
-class EtfOrder5():
-    is_single_order: bool
-    date: datetime.date
-    isin: str
-    share_quantity: float
-    order_total: float
-    price_per_share: float
-
-    # def __post_init__(self):
-    #     self.price_per_share = self.order_total / self.share_quantity
-
-    def __lt__(self, other):
-        return self.date < other.date
-
-    def __gt__(self, other):
-        return self.date > other.date
-
-    def __ge__(self, other):
-        return self.date >= other.date
-
-    def __le__(self, other):
-        return self.date <= other.date
-
-    def __eq__(self, other):
-        return all([self.date == other.date, self.isin == other.isin])
-
-    def __add__(self, other):
-        return EtfOrder(True, self.date, self.isin, self.share_quantity + other.share_quantity, self.order_total + other.order_total, self.price_per_share + other.price_per_share)
-
-    def __radd__(self, other):
-        return EtfOrder(True, self.date, self.isin, self.share_quantity + other.share_quantity, self.order_total + other.order_total, self.price_per_share + other.price_per_share)
 
 
 class PdfParser():
@@ -110,6 +74,9 @@ class PdfParser():
             concat_lines = " ".join([self._elements[18], self._elements[19]])
             phrases_list = concat_lines.split(" ")
 
+            if "Verkauf" in phrases_list:
+                print(phrases_list)
+
             for phrase in phrases_list:
                 try:
                     execution_date_str = datetime.strptime(phrase[:10], "%d.%m.%Y")
@@ -128,14 +95,14 @@ class PdfParser():
             """extract share quantity"""
 
             str_containing_share_quantity = self._elements[row_index].split(" ")[1]
-            share_quantity = str_containing_share_quantity[12:].replace(",", ".")
+            share_quantity = str_containing_share_quantity[12:].replace(".", "").replace(",", ".")
             return float(share_quantity)
 
         def extract_order_total(row_index: int) -> float:
             """extract full amount of order"""
 
             str_containing_order_total = self._elements[row_index].split(" ")[5]
-            order_total = str_containing_order_total.replace(",", ".")
+            order_total = str_containing_order_total.replace(".", "").replace(",", ".")
             return float(order_total)
 
         def calc_price_per_share(share_quantity: float = 0, order_total: float = 0) -> float:
@@ -157,8 +124,9 @@ class PdfParser():
             return lines_contain_isin.index(True)
 
         self._order_list = []
-        for pdf in tqdm(self._list_of_pdfs):
-            self._elements = extract_pdf_elements(pdf)
+        for pdf_file_name in tqdm(self._list_of_pdfs):
+            
+            self._elements = extract_pdf_elements(pdf_file_name)
             row_index = get_relevant_row_index_with_purchase_infos()
 
             share_quantity = extract_share_quantity(row_index)

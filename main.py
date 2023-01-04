@@ -5,7 +5,8 @@ from datetime import date
 import pandas as pd
 
 if __name__ == "__main__":
-    PDF_PATH = r"/home/marinus/Documents/test_alle"
+    PDF_PATH = r"/home/marinus/Documents/docs_pytr/Sparplan/Abrechnung"
+    FIG_PATH = r"/home/marinus/Documents/"
 
 
     parser = PdfParser(PDF_PATH)
@@ -18,7 +19,7 @@ if __name__ == "__main__":
 
     scrapper = FinanceDataScraper()
 
-    plotter = EtfPlotter(PDF_PATH, "blabla", (from_date, to_date))
+    plotter = EtfPlotter(FIG_PATH, "blabla", (from_date, to_date))
 
     for isin in isin_list:
         subplot_config = {"SubplotTitle": scrapper.fetch_isin_name(isin),
